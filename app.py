@@ -30,9 +30,10 @@ class Proxy(db.Model):
     is_data_center_proxy = db.Column(db.Boolean)
     is_home_proxy = db.Column(db.Boolean)
 
-    def __init__(self, ip, port, type, is_mobile_proxy, is_data_center_proxy, is_home_proxy):
+    def __init__(self, ip, port, is_valid, type, is_mobile_proxy, is_data_center_proxy, is_home_proxy):
         self.ip = ip
         self.port = port
+        self.is_valid = is_valid
         self.type = type
         self.is_mobile_proxy = is_mobile_proxy
         self.is_data_center_proxy = is_data_center_proxy
@@ -55,13 +56,12 @@ class ProxySchema(ma.Schema):
                   'type', 'is_mobile_proxy', 'is_data_center_proxy', 'is_home_proxy')
 
 
-proxy_schema = ProxySchema(strict=True)
-proxies_schema = ProxySchema(many=True, strict=True)
+proxy_schema = ProxySchema()
+proxies_schema = ProxySchema(many=True)
 
 
 @app.route('/proxy', methods=['POST', 'GET'])
 def manage_proxy():
-    check_validity()
     if request.method == 'POST':
         if isinstance(request.json, dict):
             js = [request.json]
@@ -75,43 +75,48 @@ def manage_proxy():
             is_mobile_proxy = js_el['is_mobile_proxy']
             is_data_center_proxy = js_el['is_data_center_proxy']
             is_home_proxy = js_el['is_home_proxy']
-
-            new_proxy = Proxy(ip=ip, port=port, type=type, is_mobile_proxy=is_mobile_proxy,
+            is_valid_proxy = is_valid(host=ip, port=port)
+            if not isinstance(is_valid_proxy, bool):
+                is_valid_proxy = False
+            new_proxy = Proxy(ip=ip, port=port, is_valid=is_valid_proxy, type=type, is_mobile_proxy=is_mobile_proxy,
                               is_data_center_proxy=is_data_center_proxy, is_home_proxy=is_home_proxy)
             db.session.add(new_proxy)
             db.session.commit()
             proxies += (new_proxy,)
+        check_validity()
         return proxies_schema.jsonify(proxies)
     else:
         all_proxies = Proxy.query.all()
         result = proxies_schema.dump(all_proxies)
-        return jsonify(result.data)
+        return jsonify(result)
 
 
-def is_valid(proxy_type: str, host: str, port: str):
-    proxy_dict = {proxy_type: host + ":" + port}
+def is_valid(host: str, port: str):
+    proxy_server = host + ":" + port
+    proxy_dict = {"http": proxy_server,
+                  "https": proxy_server,
+                  "socks": proxy_server}
     test_site = {"http://www.google.com"}
     headers = {
         'user-agent': 'Mozilla/5.0 (Windows; U; Windows NT 6.1; en-US; rv:1.9.1.5) Gecko/20091102 Firefox/3.5.5 (.NET CLR 3.5.30729)'}
 
     for site in test_site:
         try:
-            r = requests.get(site, headers=headers, proxies=proxy_dict)
+            r = requests.get(site, headers=headers, proxies=proxy_dict, timeout=1)
             status = r.status_code
             if status is 200:
                 return True
             else:
                 return False
-        except Exception as e:
-            log("Exception: " + str(e))
-            pass
+        except Exception:
+            return False
 
 
 def check_validity():
     for proxy in Proxy.query.all():
         proxy_id = proxy.id
         try:
-            is_valid_proxy = is_valid(proxy_type=proxy.type, host=proxy.ip, port=proxy.port)
+            is_valid_proxy = is_valid(host=proxy.ip, port=proxy.port)
             if isinstance(is_valid_proxy, bool):
                 db.session.query(Proxy).filter(Proxy.id == proxy_id).update({Proxy.is_valid: is_valid_proxy})
                 db.session.commit()
