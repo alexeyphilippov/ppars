@@ -1,53 +1,21 @@
 import os
-import requests
-from datetime import datetime
+import sys
+import argparse
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_marshmallow import Marshmallow
 
 app = Flask(__name__)
 basedir = os.path.abspath(os.path.dirname(__file__))
+sys.path.append(os.path.join(basedir, "utils"))
 app.config['SQLALCHEMY_DATABASE_URI'] = "sqlite:///" + os.path.join(basedir, "db.sqlite")
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
 db = SQLAlchemy(app)
 
 ma = Marshmallow(app)
 
 
-def log(s):
-    print(format(datetime.now(), '%Y-%m-%d %H:%M:%S'), '||', str(s))
-
-
-class Proxy(db.Model):
-    __table_args__ = (db.UniqueConstraint('ip', 'port', name='uix_1'),)
-    id = db.Column(db.Integer, primary_key=True)
-    ip = db.Column(db.String(100), nullable=False)
-    port = db.Column(db.String(100), nullable=False)
-    is_valid = db.Column(db.Boolean, default=False)
-    last_check_date = db.Column(db.DateTime, default=datetime.utcnow)
-    type = db.Column(db.Text)
-    is_mobile_proxy = db.Column(db.Boolean)
-    is_data_center_proxy = db.Column(db.Boolean)
-    is_home_proxy = db.Column(db.Boolean)
-
-    def __init__(self, ip, port, is_valid, type, is_mobile_proxy, is_data_center_proxy, is_home_proxy):
-        self.ip = ip
-        self.port = port
-        self.is_valid = is_valid
-        self.type = type
-        self.is_mobile_proxy = is_mobile_proxy
-        self.is_data_center_proxy = is_data_center_proxy
-        self.is_home_proxy = is_home_proxy
-
-    def __repr__(self):
-        return "<Proxy: id = {id}; ip = {ip}; port = {port};is_valid = {is_valid};last_check_date = {last_check_date};\
-        type = {type};is_mobile_proxy = {is_mobile_proxy};is_data_center_proxy = {is_data_center_proxy};" \
-               "is_home_proxy = {is_home_proxy};>".format(id=self.id, ip=self.ip, port=self.port,
-                                                          is_valid=self.is_valid,
-                                                          last_check_date=self.last_check_date, type=self.type,
-                                                          is_mobile_proxy=self.is_mobile_proxy,
-                                                          is_data_center_proxy=self.is_data_center_proxy,
-                                                          is_home_proxy=self.is_home_proxy)
 
 
 class ProxySchema(ma.Schema):
@@ -83,7 +51,6 @@ def manage_proxy():
             db.session.add(new_proxy)
             db.session.commit()
             proxies += (new_proxy,)
-        check_validity()
         return proxies_schema.jsonify(proxies)
     else:
         all_proxies = Proxy.query.all()
@@ -91,42 +58,37 @@ def manage_proxy():
         return jsonify(result)
 
 
-def is_valid(host: str, port: str):
-    proxy_server = host + ":" + port
-    proxy_dict = {"http": proxy_server,
-                  "https": proxy_server,
-                  "socks": proxy_server}
-    test_site = {"http://www.google.com"}
-    headers = {
-        'user-agent': 'Mozilla/5.0 (Windows; U; Windows NT 6.1; en-US; rv:1.9.1.5) Gecko/20091102 Firefox/3.5.5 (.NET CLR 3.5.30729)'}
-
-    for site in test_site:
+@app.route("/proxy/fill", methods=['POST'])
+def fill_db():
+    proxs = get_proxies()
+    log("Collected {} valid proxies".format(len(proxs)))
+    proxies = ()
+    for p in proxs:
+        host, port = p.split(':')
+        new_proxy = Proxy(ip=host, port=port, is_valid=True, type=None, is_mobile_proxy=False,
+                          is_data_center_proxy=False, is_home_proxy=False)
         try:
-            r = requests.get(site, headers=headers, proxies=proxy_dict, timeout=1)
-            status = r.status_code
-            if status is 200:
-                return True
-            else:
-                return False
-        except Exception:
-            return False
-
-
-def check_validity():
-    for proxy in Proxy.query.all():
-        proxy_id = proxy.id
-        try:
-            is_valid_proxy = is_valid(host=proxy.ip, port=proxy.port)
-            if isinstance(is_valid_proxy, bool):
-                db.session.query(Proxy).filter(Proxy.id == proxy_id).update({Proxy.is_valid: is_valid_proxy})
-                db.session.commit()
-        except Exception as e:
-            log("Error while checking validity: " + str(e))
-            pass
-    log("Checked validity")
+            db.session.add(new_proxy)
+            db.session.commit()
+        except:
+            db.session.rollback()
+        proxies += (new_proxy,)
+    return proxies_schema.jsonify(proxies)
 
 
 if __name__ == '__main__':
+    from utils.parse_into_db import get_proxies
+    from utils.validation import is_valid
+    from utils.logger import log
+    from models.proxy import Proxy
+    from utils.validation import check_validity
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--host', type=str, help='host for running flask', default="0.0.0.0")
+    args = parser.parse_args()
+
     db.create_all()
+
     check_validity()
-    app.run(debug=True)
+
+    app.run(host=args.host, debug=True)
