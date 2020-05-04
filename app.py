@@ -81,14 +81,11 @@ if __name__ == '__main__':
     from utils.validation import is_valid
     from utils.logger import log
     from models.proxy import Proxy
-    from utils.validation import check_validity
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', type=str, help='host for running flask', default="0.0.0.0")
     args = parser.parse_args()
 
     db.create_all()
-
-    check_validity()
 
     app.run(host=args.host, debug=True)
