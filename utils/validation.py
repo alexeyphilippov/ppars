@@ -1,7 +1,7 @@
 import re
 import requests
 from multiprocessing import Pool
-from models.proxy import Proxy
+from app import Proxy
 from logger import log
 from app import db
 
