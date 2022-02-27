@@ -54,7 +54,7 @@ def is_valid(proxy_server: str):
         try:
             r = requests.get(site, headers=headers, proxies=proxy_dict, timeout=1)
             status = r.status_code
-            if status is 200:
+            if status == 200:
                 return True
             else:
                 return False

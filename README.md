@@ -4,14 +4,10 @@
 
 ## Docker
 
-### Установка
 
+### Запуск
 ```bash
-docker build -t ppar ./ppars/
-```
-### Запуск сервера
-```bash
-docker run -p 5000:5000 ppar
+docker-compose up
 ```
 
 ---
